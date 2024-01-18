@@ -67,7 +67,7 @@ jobs:
     - name: Create Gitlab Repository
       run: |
         cd workspace
-        curl --header "PRIVATE-TOKEN: ${{ secrets.GITLAB_TOKEN }}" -X POST "https://gitlab.com/api/v4/projects?name=Realme_RMX3081_${{ env.MANUFACTURER_NAME }}_${{ env.VENDOR_NAME }}&visibility=public" > repo.json
+        curl --header "PRIVATE-TOKEN: ${{ secrets.GITLAB_TOKEN }}" -X POST "https://gitlab.com/api/v4/projects?name=android_dump_${{ env.MANUFACTURER_NAME }}_${{ env.VENDOR_NAME }}&visibility=public" > repo.json
         echo "USERNAME=$(cat repo.json | grep -o '"username":"[^"]*' | cut -d'"' -f4)" >> $GITHUB_ENV
         cat repo.json
 
@@ -84,7 +84,7 @@ jobs:
         git branch -M ${{ env.BRANCH }}
         git config --global user.name "perilouspike"
         git config --global user.email "shibushaji199818@gmail.com"
-        git remote add origin https://${{ secrets.GITLAB_TOKEN_NAME }}:${{ secrets.GITLAB_TOKEN }}@gitlab.com/${{ env.USERNAME }}/Realme_RMX3081_${{ env.MANUFACTURER_NAME }}_${{ env.VENDOR_NAME }}.git
+        git remote add origin https://${{ secrets.GITLAB_TOKEN_NAME }}:${{ secrets.GITLAB_TOKEN }}@gitlab.com/${{ env.USERNAME }}/android_dump_${{ env.MANUFACTURER_NAME }}_${{ env.VENDOR_NAME }}.git
         find . -type f -size +100M -exec git lfs track {} \;
         if [ -f .gitattributes ]; then
             git add .gitattributes
