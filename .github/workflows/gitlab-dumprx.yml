@@ -38,7 +38,9 @@ jobs:
         cd workspace/dumprx
         bash dumper.sh ${{ github.event.inputs.FIRMWARE_LINK }}
         cd out
-        echo "MANUFACTURER_NAME=$(grep "ro.product.vendor.manufacturer" vendor/build.prop | awk -F "=" '{split($2, words, " "); print words[1]; exit}')" >> $GITHUB_ENV
+        # Using tr to safely clean carriage returns and force lowercase matching
+        MANUFACTURER=$(grep "ro.product.vendor.manufacturer" vendor/build.prop | awk -F "=" '{print $2}' | awk '{print $1}' | tr -d '\r' | tr '[:upper:]' '[:lower:]')
+        echo "MANUFACTURER_NAME=${MANUFACTURER}" >> $GITHUB_ENV
 
     - name: Set Variables - if oplus
       if: env.MANUFACTURER_NAME == 'oplus'
@@ -46,58 +48,75 @@ jobs:
         cd workspace/dumprx/out
         rm -rf .git
         if [ -d odm ]; then
-           echo "ODM directory exist..."
+           echo "ODM directory exists..."
         else
            echo "Making fake ODM directory..."
            mkdir -p odm && cd odm
            echo "ro.vendor.oplus.market.name=ossi-${{ github.run_id }}" > build.prop
            cd ..
         fi
-        echo "VENDOR_NAME=$(grep "ro.vendor.oplus.market.name" odm/build.prop | awk -F "=" '{split($2, words, " "); print words[1]; exit}')" >> $GITHUB_ENV
-        echo "BRANCH=$(grep "ro.vendor.build.id" vendor/build.prop | awk -F "=" '{split($2, words, " "); print words[1]; exit}')" >> $GITHUB_ENV
+        VENDOR=$(grep "ro.vendor.oplus.market.name" odm/build.prop | awk -F "=" '{print $2}' | awk '{print $1}' | tr -d '\r')
+        BRANCH_NAME=$(grep "ro.vendor.build.id" vendor/build.prop | awk -F "=" '{print $2}' | awk '{print $1}' | tr -d '\r')
+        echo "VENDOR_NAME=${VENDOR}" >> $GITHUB_ENV
+        echo "BRANCH=${BRANCH_NAME}" >> $GITHUB_ENV
 
     - name: Set Variables - if others
       if: env.MANUFACTURER_NAME != 'oplus'
       run: |
         cd workspace/dumprx/out
         rm -rf .git
-        echo "VENDOR_NAME=$(grep "ro.product.vendor.device" vendor/build.prop | awk -F "=" '{split($2, words, " "); print words[1]; exit}')" >> $GITHUB_ENV
-        echo "BRANCH=$(grep "ro.vendor.build.id" vendor/build.prop | awk -F "=" '{split($2, words, " "); print words[1]; exit}')" >> $GITHUB_ENV
+        VENDOR=$(grep "ro.product.vendor.device" vendor/build.prop | awk -F "=" '{print $2}' | awk '{print $1}' | tr -d '\r')
+        BRANCH_NAME=$(grep "ro.vendor.build.id" vendor/build.prop | awk -F "=" '{print $2}' | awk '{print $1}' | tr -d '\r')
+        echo "VENDOR_NAME=${VENDOR}" >> $GITHUB_ENV
+        echo "BRANCH=${BRANCH_NAME}" >> $GITHUB_ENV
 
     - name: Create Gitlab Repository
       run: |
         cd workspace
-        curl --header "PRIVATE-TOKEN: ${{ secrets.GITLAB_TOKEN }}" -X POST "https://gitlab.com/api/v4/projects?name=android_dump_${{ env.MANUFACTURER_NAME }}_${{ env.VENDOR_NAME }}&visibility=public" > repo.json
-        echo "USERNAME=$(cat repo.json | grep -o '"username":"[^"]*' | cut -d'"' -f4)" >> $GITHUB_ENV
+        # Rely strictly on environment variables via Bash syntax to prevent compilation-time blank values
+        REPO_NAME="android_dump_${MANUFACTURER_NAME}_${VENDOR_NAME}"
+        
+        curl --header "PRIVATE-TOKEN: ${{ secrets.GITLAB_TOKEN }}" \
+             -X POST "https://gitlab.com{REPO_NAME}&visibility=public" > repo.json
+        
+        # Safely parse the username via sed or grep
+        GITLAB_USER=$(grep -o '"username":"[^"]*' repo.json | cut -d'"' -f4 | head -n1)
+        echo "USERNAME=${GITLAB_USER}" >> $GITHUB_ENV
         cat repo.json
 
     - name: Push as Repository
       run: |
         cd workspace/dumprx/out
-        rm -rf .git
-        rm -rf .gitignore
-        rm -rf .gitattributes
+        rm -rf .git .gitignore .gitattributes
+        
         DUMP_DIR_LIST=$(find -type d -not -empty -printf "%P\n" | grep -v / | grep -v .git)
         git init
         git lfs install
+        
         find . \( -name "*sensetime*" -o -name "*.lic" \) | cut -d'/' -f'2-' >| .gitignore
-        git branch -M ${{ env.BRANCH }}
+        
+        # Use Bash environmental variable interpolation consistently
+        git branch -M "${BRANCH}"
         git config --global user.name "Carlo Dandan"
         git config --global user.email "carlodandan.personal@proton.me"
-        git remote add origin https://${{ secrets.GITLAB_TOKEN_NAME }}:${{ secrets.GITLAB_TOKEN }}@gitlab.com/${env.USERNAME}/android_dump_${env.MANUFACTURER_NAME}_${env.VENDOR_NAME}.git
+        
+        git remote add origin "https://${{ secrets.GITLAB_TOKEN_NAME }}:${{ secrets.GITLAB_TOKEN }}@gitlab.com/${USERNAME}/android_dump_${MANUFACTURER_NAME}_${VENDOR_NAME}.git"
+        
         find . -type f -size +100M -exec git lfs track {} \;
         if [ -f .gitattributes ]; then
             git add .gitattributes
             git commit -s -m "Setup Git LFS"
-            git push -u origin ${{ env.BRANCH }}
+            git push -u origin "${BRANCH}"
         fi
+        
         for dir in ${DUMP_DIR_LIST}; do
-            git add ${dir}
+            git add "${dir}"
             git commit -s -m "dump: ${dir}: import dump for ${VENDOR_NAME}
             Firmware: ${{ github.event.inputs.FIRMWARE_LINK }}"
-            git push -u origin ${{ env.BRANCH }}
+            git push -u origin "${BRANCH}"
         done
+        
         git add .
         git commit -s -m "dump: import remaining dump for ${VENDOR_NAME}
         Firmware: ${{ github.event.inputs.FIRMWARE_LINK }}"
-        git push -u origin ${{ env.BRANCH }}
+        git push -u origin "${BRANCH}"
